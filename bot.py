@@ -12,112 +12,73 @@ BSKY_HANDLE = os.environ.get('BSKY_HANDLE')
 BSKY_PASSWORD = os.environ.get('BSKY_PASSWORD')
 
 def scrape_timetree():
-    """TimeTreeから今日の予定をスクレイピングする"""
     JST = timezone(timedelta(hours=+9))
     now = datetime.now(JST)
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             locale='ja-JP',
-            timezone_id='Asia/Tokyo',
-            viewport={'width': 1280, 'height': 800}
+            timezone_id='Asia/Tokyo'
         )
         page = context.new_page()
 
         try:
-            # 1. ログイン処理
-            print("TimeTreeにアクセス中...")
+            # ログイン
             page.goto("https://timetreeapp.com/signin")
-            
-            # 入力を少しゆっくりにする（1文字ごとに50ms休む）
-            page.type('input[type="email"]', TIMETREE_EMAIL, delay=50)
-            page.type('input[type="password"]', TIMETREE_PASSWORD, delay=50)
-            
-            # ボタンをクリックする代わりに、パスワード欄で「Enter」キーを押す
-            # これにより、ボタンの配置変更や重なりを無視して送信できます
-            print("ログイン情報を送信中...")
+            page.fill('input[type="email"]', TIMETREE_EMAIL)
+            page.fill('input[type="password"]', TIMETREE_PASSWORD)
             page.keyboard.press("Enter")
             
-            # ログイン後の読み込み（ネットワークが落ち着くまで）を最大30秒待つ
-            # ここでURLが /calendars に変わるのをじっくり待ちます
-            try:
-                page.wait_for_load_state("networkidle", timeout=30000)
-                print("ログイン完了。カレンダーへ移動します...")
-            except:
-                print("読み込みに時間がかかっていますが、強行します。")
-
-            # 直接カレンダーURLへ
+            # 遷移待ち
+            page.wait_for_function("() => !window.location.href.includes('signin')", timeout=30000)
+            
+            # カレンダーへ
             page.goto(TIMETREE_CALENDAR_URL)
-            
-            # 2. カレンダーの読み込みを待機
-            print("画面の読み込みを待機中（最大60秒）...")
-            try:
-                # 「今日」のボタンが出るまで待つ
-                page.wait_for_selector('button[aria-current="date"]', timeout=60000)
-            except:
-                print("カレンダーの読み込みが遅れていますが、処理を続行します。")
-            
-            # ポップアップ対策
+            page.wait_for_selector('button[aria-current="date"]', timeout=30000)
             page.keyboard.press("Escape")
             time.sleep(2)
 
-            # 3. 今日の予定を取得
-            print("今日の詳細パネルを開いています...")
+            # パネル展開
             today_button = page.locator('button[aria-current="date"]')
-            
             if today_button.count() > 0:
                 today_button.click(force=True)
-                time.sleep(2) # パネル展開を待つ
-            else:
-                print("今日のボタンが見つかりませんでした。")
-                return None
-
-            # 詳細パネル内の予定タイトルを待機
-            try:
-                # [data-test-id="event-title"] を使用
-                page.wait_for_selector('[data-test-id="event-title"]', timeout=10000)
-                titles = page.locator('[data-test-id="event-title"]').all_text_contents()
-            except:
-                print("今日の予定は見つかりませんでした。")
-                return None
-
-            # 4. 整形
-            event_titles = sorted(list(set([t.strip() for t in titles if t.strip()])))
-            if not event_titles:
-                return None
-
-            msg = f"【{now.strftime('%m/%d')}の予定】\n"
-            for title in event_titles:
-                msg += f"・{title}\n"
-            
-            # Bluesky 300文字制限対策
-            if len(msg) > 300:
-                msg = msg[:297] + "..."
+                time.sleep(3)
                 
-            return msg
+                # 抽出
+                titles = page.locator('[data-test-id="event-title"]').all_text_contents()
+                event_titles = sorted(list(set([t.strip() for t in titles if t.strip()])))
+
+                if not event_titles:
+                    return None
+
+                msg = f"【{now.strftime('%m/%d')}の予定】\n"
+                for title in event_titles:
+                    msg += f"・{title}\n"
+                
+                # 文字数制限対策
+                return msg[:300]
+            return None
 
         except Exception as e:
-            print(f"スクレイピングエラー: {e}")
+            print(f"Scraping Error: {e}")
             return None
         finally:
             browser.close()
 
 def post_to_bluesky(text):
-    """Blueskyに投稿する"""
     try:
-        print("Blueskyに投稿中...")
         client = Client()
         client.login(BSKY_HANDLE, BSKY_PASSWORD)
         client.send_post(text)
-        print("投稿に成功しました！")
+        print("Successfully posted to Bluesky.")
     except Exception as e:
-        print(f"Bluesky投稿エラー: {e}")
+        print(f"Bluesky Error: {e}")
 
 if __name__ == "__main__":
     content = scrape_timetree()
     if content:
-        print(f"--- 投稿内容 ---\n{content}")
         post_to_bluesky(content)
     else:
-        print("投稿する内容がないため、終了します。")
+        print("No content to post.")

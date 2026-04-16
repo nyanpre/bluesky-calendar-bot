@@ -5,7 +5,6 @@ from playwright.sync_api import sync_playwright
 from atproto import Client
 
 # --- 設定エリア ---
-# GitHub Secretsから環境変数を読み込みます
 TIMETREE_EMAIL = os.environ.get('TIMETREE_EMAIL')
 TIMETREE_PASSWORD = os.environ.get('TIMETREE_PASSWORD')
 TIMETREE_CALENDAR_URL = os.environ.get('TIMETREE_CALENDAR_URL')
@@ -18,7 +17,6 @@ def scrape_timetree():
     now = datetime.now(JST)
     
     with sync_playwright() as p:
-        # ブラウザの起動 (GitHub Actions上で動くようヘッドレスモード)
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale='ja-JP',
@@ -34,62 +32,48 @@ def scrape_timetree():
             page.fill('input[type="email"]', TIMETREE_EMAIL)
             page.fill('input[type="password"]', TIMETREE_PASSWORD)
             
-            # ログインボタンを確実に押す
+            # ログインボタンを確実にクリック
             page.click('button[type="submit"]', force=True)
             
-            # 【重要】URLが変わるのを待たず、3秒だけ待ってから直接カレンダーへ飛ぶ
+            # URL監視を避け、3秒待機後に直接カレンダーURLへ移動
             print("ログイン処理を実行しました。カレンダーページへ移動します...")
             time.sleep(3) 
             page.goto(TIMETREE_CALENDAR_URL)
             
-            # カレンダーの主要な要素（今日のボタンなど）が出るまで最大1分待つ
-            print("画面の読み込みを待機中...")
-            
+            # 2. カレンダーの読み込みを待機
+            print("画面の読み込みを待機中（最大60秒）...")
             try:
+                # 「今日」のボタンが出るまで待つ
                 page.wait_for_selector('button[aria-current="date"]', timeout=60000)
             except:
-                print("カレンダーの読み込みに時間がかかっています。現在の状態を確認します。")
+                print("カレンダーの読み込みが遅れていますが、処理を続行します。")
             
-            # ポップアップが出た場合に備えてEscapeキーを押す
+            # ポップアップ対策
             page.keyboard.press("Escape")
             time.sleep(2)
-            try:
-                # ログイン後に必ず表示される「カレンダー」の文字や特定のボタンを待つ
-                page.wait_for_selector('text="カレンダー"', timeout=60000)
-            except:
-                # もしタイムアウトしても、一旦そのまま進めてみる
-                print("待機中にタイムアウトしましたが、続行します。")
-            
-            # 2. カレンダーページへ移動
-            print(f"カレンダーにアクセス中: {TIMETREE_CALENDAR_URL}")
-            page.goto(TIMETREE_CALENDAR_URL)
-            
-            # ポップアップが出た場合に備えてEscapeキーを押す
-            time.sleep(5)
-            page.keyboard.press("Escape")
 
             # 3. 今日の予定を取得
-            # 今日のボタン（aria-current="date"）を探してクリック
             print("今日の詳細パネルを開いています...")
             today_button = page.locator('button[aria-current="date"]')
+            
             if today_button.count() > 0:
-                today_button.click()
+                today_button.click(force=True)
+                time.sleep(2) # パネル展開を待つ
             else:
                 print("今日のボタンが見つかりませんでした。")
                 return None
 
-            # 詳細パネル内のタイトル要素(data-test-id)を待機
-            # 予定がない場合はタイムアウトするので、try-exceptで囲みます
+            # 詳細パネル内の予定タイトルを待機
             try:
-                page.wait_for_selector('[data-test-id="event-title"]', timeout=5000)
+                # [data-test-id="event-title"] を使用
+                page.wait_for_selector('[data-test-id="event-title"]', timeout=10000)
                 titles = page.locator('[data-test-id="event-title"]').all_text_contents()
             except:
-                print("今日の予定は空のようです。")
+                print("今日の予定は見つかりませんでした。")
                 return None
 
-            # 4. 取得したテキストの整形
+            # 4. 整形
             event_titles = sorted(list(set([t.strip() for t in titles if t.strip()])))
-
             if not event_titles:
                 return None
 
@@ -97,14 +81,14 @@ def scrape_timetree():
             for title in event_titles:
                 msg += f"・{title}\n"
             
-            # Blueskyの300文字制限対策
+            # Bluesky 300文字制限対策
             if len(msg) > 300:
                 msg = msg[:297] + "..."
                 
             return msg
 
         except Exception as e:
-            print(f"エラー発生: {e}")
+            print(f"スクレイピングエラー: {e}")
             return None
         finally:
             browser.close()
@@ -121,7 +105,6 @@ def post_to_bluesky(text):
         print(f"Bluesky投稿エラー: {e}")
 
 if __name__ == "__main__":
-    # 実行
     content = scrape_timetree()
     if content:
         print(f"--- 投稿内容 ---\n{content}")

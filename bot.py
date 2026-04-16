@@ -30,23 +30,27 @@ def scrape_timetree():
             page.fill('input[type="email"]', TIMETREE_EMAIL)
             page.fill('input[type="password"]', TIMETREE_PASSWORD)
             page.keyboard.press("Enter")
-            
-            # 遷移待ち
             page.wait_for_function("() => !window.location.href.includes('signin')", timeout=30000)
             
-            # カレンダーへ
-            page.goto(TIMETREE_CALENDAR_URL)
-            page.wait_for_selector('button[aria-current="date"]', timeout=30000)
+            # カレンダーへ（読み込み待ち強化）
+            page.goto(TIMETREE_CALENDAR_URL, wait_until="networkidle")
+            time.sleep(5)
+            
+            try:
+                page.wait_for_selector('button[aria-current="date"]', timeout=30000)
+            except:
+                page.reload(wait_until="networkidle")
+                page.wait_for_selector('button[aria-current="date"]', timeout=30000)
+
             page.keyboard.press("Escape")
             time.sleep(2)
 
-            # パネル展開
+            # 予定取得
             today_button = page.locator('button[aria-current="date"]')
             if today_button.count() > 0:
                 today_button.click(force=True)
                 time.sleep(3)
                 
-                # 抽出
                 titles = page.locator('[data-test-id="event-title"]').all_text_contents()
                 event_titles = sorted(list(set([t.strip() for t in titles if t.strip()])))
 
@@ -57,7 +61,6 @@ def scrape_timetree():
                 for title in event_titles:
                     msg += f"・{title}\n"
                 
-                # 文字数制限対策
                 return msg[:300]
             return None
 

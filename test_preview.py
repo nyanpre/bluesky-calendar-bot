@@ -11,11 +11,11 @@ TIMETREE_CALENDAR_URL = os.environ.get('TIMETREE_CALENDAR_URL')
 def test_preview():
     JST = timezone(timedelta(hours=+9))
     now = datetime.now(JST)
-    print(f"=== テスト実行開始 ({now.strftime('%Y-%m-%d %H:%M:%S')}) ===")
+    print(f"=== 実行開始 ({now.strftime('%Y-%m-%d %H:%M:%S JST')}) ===")
     
     with sync_playwright() as p:
-        # ボット検知を避けるため、一般的なWindowsのChromeとして振る舞う
         browser = p.chromium.launch(headless=True)
+        # 一般的なWindows Chromeのふりをして検知を回避
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             locale='ja-JP',
@@ -25,53 +25,45 @@ def test_preview():
         page = context.new_page()
 
         try:
-            # 直接カレンダーURLへアクセス（未ログインならsigninに飛ばされる）
-            print(f"カレンダーページにアクセス中...")
-            page.goto(TIMETREE_CALENDAR_URL)
-            time.sleep(5)
-
-            # ログイン画面にリダイレクトされた場合の処理
-            if "signin" in page.url:
-                print("未ログイン状態です。ログイン情報を入力します...")
-                page.type('input[type="email"]', TIMETREE_EMAIL, delay=100)
-                page.type('input[type="password"]', TIMETREE_PASSWORD, delay=100)
-                
-                print("ログイン情報を送信中（Enterキー）...")
-                page.keyboard.press("Enter")
-                
-                # URLに 'signin' という文字列が含まれなくなるまで最大60秒待つ
-                print("ログイン完了とカレンダーへの遷移を待機しています...")
-                try:
-                    page.wait_for_function("() => !window.location.href.includes('signin')", timeout=60000)
-                    print("ログインに成功しました。")
-                except:
-                    print(f"⚠️ ログイン後の遷移がタイムアウトしました。現在のURL: {page.url}")
-                    page.screenshot(path="error_login_timeout.png")
+            # 直接ログイン画面へ
+            print("TimeTreeにログイン中...")
+            page.goto("https://timetreeapp.com/signin")
             
-            # 再度カレンダーURLへ（確実に予定ページを表示するため）
-            page.goto(TIMETREE_CALENDAR_URL)
+            # メールアドレスとパスワードを入力
+            page.fill('input[type="email"]', TIMETREE_EMAIL)
+            page.fill('input[type="password"]', TIMETREE_PASSWORD)
             
-            print("カレンダー画面の読み込みを待機中...")
+            # Enterキーで送信し、遷移を待つ
+            page.keyboard.press("Enter")
+            
+            # ログインが完了してURLから 'signin' が消えるのを待つ
             try:
-                # 今日の日付ボタンが表示されるのを待つ
-                page.wait_for_selector('button[aria-current="date"]', timeout=30000)
+                page.wait_for_function("() => !window.location.href.includes('signin')", timeout=30000)
+                print("ログインに成功しました。")
             except:
-                print("❌ 予定画面を表示できませんでした。")
-                page.screenshot(path="error_calendar_not_found.png")
+                print(f"ログイン後の遷移に失敗しました。現在のURL: {page.url}")
+                page.screenshot(path="error_login.png")
                 return
 
-            # ポップアップがあれば消す
+            # カレンダーページへ移動
+            print("カレンダーを読み込み中...")
+            page.goto(TIMETREE_CALENDAR_URL)
+            
+            # 「今日」のボタンが出るまで待機
+            page.wait_for_selector('button[aria-current="date"]', timeout=30000)
+            
+            # ポップアップを閉じる
             page.keyboard.press("Escape")
             time.sleep(2)
 
-            # 予定の抽出
-            print("今日の予定をパネルから取得中...")
+            # 今日の予定パネルを展開
             today_button = page.locator('button[aria-current="date"]')
             if today_button.count() > 0:
+                print("今日の予定を抽出しています...")
                 today_button.click(force=True)
-                time.sleep(3) # パネルが開くのを待つ
+                time.sleep(3) # 展開待ち
                 
-                # スクリーンショットで確認した data-test-id を使用
+                # イベントタイトルを取得
                 titles = page.locator('[data-test-id="event-title"]').all_text_contents()
                 event_titles = sorted(list(set([t.strip() for t in titles if t.strip()])))
 
@@ -81,21 +73,19 @@ def test_preview():
                         msg += f"・{title}\n"
                     
                     print("\n" + "="*30)
-                    print("📣 ポスト予定のプレビュー")
-                    print("="*30)
                     print(msg)
                     print("="*30)
                 else:
-                    print("ℹ️ 今日の予定は登録されていないようです。")
+                    print("ℹ️ 今日の予定は見つかりませんでした。")
             else:
-                print("❌ 今日の日付ボタンが見つかりませんでした。")
+                print("❌ 今日の日付ボタンが見つかりません。")
 
         except Exception as e:
-            print(f"❌ 実行中にエラーが発生しました: {e}")
+            print(f"❌ エラー発生: {e}")
             page.screenshot(path="error_fatal.png")
         finally:
             browser.close()
-            print("=== テスト実行終了 ===")
+            print("=== 実行終了 ===")
 
 if __name__ == "__main__":
     test_preview()

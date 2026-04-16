@@ -13,9 +13,10 @@ def test_preview():
     JST = timezone(timedelta(hours=+9))
     now = datetime.now(JST)
     
-    print("=== テスト実行開始 ===")
+    print(f"=== テスト実行開始 ({now.strftime('%Y-%m-%d %H:%M:%S')}) ===")
     
     with sync_playwright() as p:
+        # ブラウザの起動
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             locale='ja-JP',
@@ -26,45 +27,52 @@ def test_preview():
 
         try:
             # 1. ログイン処理
-            print(f"[{now.strftime('%H:%M:%S')}] TimeTreeにログイン中...")
+            print("TimeTreeにアクセス中...")
             page.goto("https://timetreeapp.com/signin")
             page.fill('input[type="email"]', TIMETREE_EMAIL)
             page.fill('input[type="password"]', TIMETREE_PASSWORD)
-            page.click('button[type="submit"]')
             
-            # 1分（60000ms）まで粘るように時間を延ばします
-            print("画面の読み込みを待機中...")
-            try:
-                # ログイン後に必ず表示される「カレンダー」の文字や特定のボタンを待つ
-                page.wait_for_selector('text="カレンダー"', timeout=60000)
-            except:
-                # もしタイムアウトしても、一旦そのまま進めてみる
-                print("待機中にタイムアウトしましたが、続行します。")
+            # ログインボタンを確実に押す
+            page.click('button[type="submit"]', force=True)
             
-            # 2. カレンダーページへ移動
-            print(f"[{now.strftime('%H:%M:%S')}] カレンダーへ移動中...")
+            # 【重要】URLが変わるのを待たず、3秒だけ待ってから直接カレンダーへ飛ぶ
+            print("ログイン処理を実行しました。カレンダーページへ移動します...")
+            time.sleep(3) 
             page.goto(TIMETREE_CALENDAR_URL)
             
-            # ポップアップ対策
-            time.sleep(5)
+            # 2. カレンダーの読み込み待機
+            print("画面の読み込みを待機中（最大60秒）...")
+            try:
+                # 今日の日付ボタンが出るまで粘り強く待つ
+                page.wait_for_selector('button[aria-current="date"]', timeout=60000)
+            except:
+                print("⚠️ カレンダーの読み込みに時間がかかっています。現在の状態を確認します。")
+            
+            # 案内ポップアップなどが出ている可能性を考慮してEscape
             page.keyboard.press("Escape")
+            time.sleep(2)
 
             # 3. 今日の予定を取得
-            print(f"[{now.strftime('%H:%M:%S')}] 今日の詳細パネルを開いています...")
+            print("今日の詳細パネルを開いています...")
             today_button = page.locator('button[aria-current="date"]')
             
             if today_button.count() > 0:
-                today_button.click()
+                # 確実にクリックするために force=True を追加
+                today_button.click(force=True)
+                time.sleep(2) # パネルが開くのを少し待つ
             else:
                 print("❌ 今日の日付ボタンが見つかりませんでした。")
+                # デバッグ用に現在のURLを表示
+                print(f"現在のURL: {page.url}")
                 return
 
             # 詳細パネル内の予定タイトルを待機
             try:
-                page.wait_for_selector('[data-test-id="event-title"]', timeout=5000)
+                # 画像で見つけた最強の目印 data-test-id を使用
+                page.wait_for_selector('[data-test-id="event-title"]', timeout=10000)
                 titles = page.locator('[data-test-id="event-title"]').all_text_contents()
             except:
-                print("ℹ️ 今日の予定は登録されていないようです。")
+                print("ℹ️ 今日の予定は登録されていないか、詳細パネルが開きませんでした。")
                 return
 
             # 4. 整形とプレビュー表示
@@ -87,10 +95,10 @@ def test_preview():
             if char_count > 300:
                 print("⚠️ 警告: 300文字を超えています！本番では切り捨てられます。")
             else:
-                print("✅ 文字数制限クリア（Blueskyに投稿可能です）")
+                print("✅ 文字数制限クリア")
 
         except Exception as e:
-            print(f"❌ エラーが発生しました: {e}")
+            print(f"❌ 予期せぬエラーが発生しました: {e}")
         finally:
             browser.close()
             print("\n=== テスト実行終了 ===")

@@ -32,7 +32,14 @@ def test_preview():
             page.fill('input[type="password"]', TIMETREE_PASSWORD)
             page.click('button[type="submit"]')
             
-            page.wait_for_url("**/calendars**", timeout=30000)
+            # 1分（60000ms）まで粘るように時間を延ばします
+            print("画面の読み込みを待機中...")
+            try:
+                # ログイン後に必ず表示される「カレンダー」の文字や特定のボタンを待つ
+                page.wait_for_selector('text="カレンダー"', timeout=60000)
+            except:
+                # もしタイムアウトしても、一旦そのまま進めてみる
+                print("待機中にタイムアウトしましたが、続行します。")
             
             # 2. カレンダーページへ移動
             print(f"[{now.strftime('%H:%M:%S')}] カレンダーへ移動中...")

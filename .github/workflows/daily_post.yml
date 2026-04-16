@@ -1,0 +1,51 @@
+name: Daily Calendar Bot
+
+on:
+  schedule:
+    # 毎日日本時間の朝8:00に実行 (UTC 23:00)
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 手動実行ボタンを有効にする設定
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. リポジトリのコードをサーバーにコピー
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Pythonのセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # 二回目以降の実行を速くする
+
+      # 3. 必要なライブラリのインストール
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      # 4. スクレイピング用のブラウザ(Chromium)をインストール
+      - name: Install Playwright Browsers
+        run: |
+          playwright install chromium --with-deps
+
+      # 5. テスト実行（ログで内容を確認）
+      - name: Preview Content
+        env:
+          TIMETREE_EMAIL: ${{ secrets.TIMETREE_EMAIL }}
+          TIMETREE_PASSWORD: ${{ secrets.TIMETREE_PASSWORD }}
+          TIMETREE_CALENDAR_URL: ${{ secrets.TIMETREE_CALENDAR_URL }}
+        run: python test_preview.py
+
+      # 6. 本番投稿
+      - name: Run Bot (Post to Bluesky)
+        env:
+          TIMETREE_EMAIL: ${{ secrets.TIMETREE_EMAIL }}
+          TIMETREE_PASSWORD: ${{ secrets.TIMETREE_PASSWORD }}
+          TIMETREE_CALENDAR_URL: ${{ secrets.TIMETREE_CALENDAR_URL }}
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
+        run: python bot.py

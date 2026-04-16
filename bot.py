@@ -29,15 +29,25 @@ def scrape_timetree():
             # 1. ログイン処理
             print("TimeTreeにアクセス中...")
             page.goto("https://timetreeapp.com/signin")
-            page.fill('input[type="email"]', TIMETREE_EMAIL)
-            page.fill('input[type="password"]', TIMETREE_PASSWORD)
             
-            # ログインボタンを確実にクリック
-            page.click('button[type="submit"]', force=True)
+            # 入力を少しゆっくりにする（1文字ごとに50ms休む）
+            page.type('input[type="email"]', TIMETREE_EMAIL, delay=50)
+            page.type('input[type="password"]', TIMETREE_PASSWORD, delay=50)
             
-            # URL監視を避け、3秒待機後に直接カレンダーURLへ移動
-            print("ログイン処理を実行しました。カレンダーページへ移動します...")
-            time.sleep(3) 
+            # ボタンをクリックする代わりに、パスワード欄で「Enter」キーを押す
+            # これにより、ボタンの配置変更や重なりを無視して送信できます
+            print("ログイン情報を送信中...")
+            page.keyboard.press("Enter")
+            
+            # ログイン後の読み込み（ネットワークが落ち着くまで）を最大30秒待つ
+            # ここでURLが /calendars に変わるのをじっくり待ちます
+            try:
+                page.wait_for_load_state("networkidle", timeout=30000)
+                print("ログイン完了。カレンダーへ移動します...")
+            except:
+                print("読み込みに時間がかかっていますが、強行します。")
+
+            # 直接カレンダーURLへ
             page.goto(TIMETREE_CALENDAR_URL)
             
             # 2. カレンダーの読み込みを待機
